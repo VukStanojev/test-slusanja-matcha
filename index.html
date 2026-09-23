@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="sr-Latn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test slušanja — sinteza govora</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --ink:#1c2430; --muted:#5b6675; --line:#dde2e8;
+  --accent:#1f5fa8; --accent-ink:#ffffff; --accent-soft:#e7f0fb; --ok:#1e7a46; --warn:#a35a00;
+  --radius:12px;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#12161c; --card:#1b2129; --ink:#e7ebf0; --muted:#9aa5b3; --line:#2c3440;
+         --accent:#5b9ae6; --accent-ink:#0d1117; --accent-soft:#1d2d42; --ok:#4cc38a; --warn:#e3a64b; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:680px;margin:0 auto;padding:24px 16px 64px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px;margin-top:16px}
+h1{font-size:1.5rem;line-height:1.25;margin:0 0 8px}
+h2{font-size:1.2rem;margin:0 0 12px}
+p{margin:0 0 12px}
+.muted{color:var(--muted)} .small{font-size:.9rem}
+ul{padding-left:20px;margin:0 0 12px}
+label.field{display:block;margin:0 0 16px}
+label.field > span{display:block;font-weight:600;margin-bottom:6px}
+input[type=text],input[type=number],textarea,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}
+textarea{min-height:90px;resize:vertical}
+fieldset{border:0;padding:0;margin:0 0 16px}
+legend{font-weight:600;margin-bottom:6px;padding:0}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.opt{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer}
+.opt input{margin:0}
+.check{display:flex;gap:10px;align-items:flex-start;margin:12px 0}
+.check input{margin-top:5px}
+button{font:inherit;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 16px;cursor:pointer}
+button:focus-visible,.opt:focus-within{outline:3px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.right{justify-content:flex-end}
+.progress{height:6px;background:var(--line);border-radius:999px;overflow:hidden;margin:8px 0 4px}
+.progress > div{height:100%;background:var(--accent);transition:width .2s}
+.stepline{display:flex;justify-content:space-between;font-size:.9rem;color:var(--muted)}
+.players{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+.player{border:1px solid var(--line);border-radius:var(--radius);padding:16px;text-align:center}
+.player .name{font-weight:700;margin-bottom:10px}
+.play{width:100%;padding:14px;font-size:1.05rem}
+.play.playing{background:var(--accent-soft);border-color:var(--accent)}
+.heard{font-size:.85rem;color:var(--muted);margin-top:8px;min-height:1.3em}
+.heard.done{color:var(--ok)}
+.choices{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0 16px}
+.choice{padding:12px 8px;text-align:center}
+.choice[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.scale{display:grid;gap:8px;margin:12px 0 16px}
+.scale button{display:flex;gap:12px;align-items:center;text-align:left;padding:10px 14px}
+.scale .num{font-weight:700;font-size:1.15rem;width:1.4em;text-align:center}
+.scale button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.hint{font-size:.9rem;color:var(--warn);min-height:1.4em;margin-bottom:8px}
+.badge{display:inline-block;font-size:.8rem;font-weight:600;padding:2px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.code{font:600 1.4rem ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em}
+.err{color:#c0392b;font-size:.9rem;margin-top:-10px;margin-bottom:12px}
+@media (max-width:520px){ .card{padding:18px} .choices{grid-template-columns:1fr} .players{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"><div class="card"><p>Učitavanje…</p></div></main>
+<noscript><main><div class="card">Za ovaj test potrebno je da uključite JavaScript.</div></main></noscript>
+
+<script src="config.js"></script>
+<script src="stimuli.js"></script>
+<script>
+'use strict';
+/* =====================================================================
+   Listening test: A/B preference + naturalness MOS.
+   Randomization is per listener; system identities are opaque codes
+   (X / Y) and are mapped back only in the private analysis key.
+   ===================================================================== */
+const STORE_KEY = 'lt_state_' + CONFIG.TEST_VERSION;
+const AUDIO_DIR = 'audio/';
+const app = document.getElementById('app');
+let S = null;                       // test state (persisted)
+const player = new Audio();         // single shared player
+player.preload = 'auto';
+
+/* ---------- utilities ---------- */
+function rnd(n){ const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; }
+function shuffle(arr){ const a = arr.slice(); for(let i=a.length-1;i>0;i--){ const j=rnd(i+1); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function uuid(){ return (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(16)+'-'+rnd(1e9).toString(16)); }
+function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(S)); }catch(e){} }
+function load(){ try{ const t = localStorage.getItem(STORE_KEY); return t ? JSON.parse(t) : null; }catch(e){ return null; } }
+function clearSaved(){ try{ localStorage.removeItem(STORE_KEY); }catch(e){} }
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+function view(html){ stopAudio(); app.innerHTML=''; const c=el(html); app.appendChild(c); window.scrollTo(0,0); return c; }
+function preload(files){ files.forEach(f=>{ const a=new Audio(); a.preload='auto'; a.src=AUDIO_DIR+f+'.wav'; }); }
+
+/* ---------- randomized plan (built once per listener) ---------- */
+function buildPrefPlan(){
+  // Counterbalance presentation order within each speaker: half X-first, half Y-first.
+  let trials = [];
+  for (const spk of ['J','S']){
+    const items = shuffle(STIMULI.pref.filter(p=>p.spk===spk));
+    items.forEach((p,i)=>trials.push({ item:p.item, spk, first: i < items.length/2 ? 'X':'Y', repeat:false }));
+  }
+  trials = shuffle(trials);
+  // One consistency repeat per speaker, order swapped, placed late and >= 6 trials after the original.
+  // Pick the pair to repeat from the first 16 positions so a distant late slot always exists.
+  const reps = ['J','S'].map(spk=>{ const t = shuffle(trials.slice(0,16).filter(x=>x.spk===spk))[0];
+                                   return { item:t.item, spk, first: t.first==='X'?'Y':'X', repeat:true }; });
+  for (let tries=0; tries<2000; tries++){
+    const out = trials.slice();
+    for (const r of reps) out.splice(out.length - 8 + rnd(9), 0, r);   // among the last slots
+    const ok = reps.every(r => out.indexOf(r) - out.findIndex(x=>x.item===r.item && !x.repeat) >= 6);
+    if (ok) return out;
+  }
+  return trials.concat(reps);
+}
+function buildMosPlan(){
+  const base = STIMULI.mos.map(m=>({ item:m.item, spk:m.spk, sys:m.sys, file:m.file }));
+  for (let tries=0; tries<20000; tries++){
+    const a = shuffle(base);
+    let ok = true;               // the two versions of a sentence are >= 3 positions apart
+    for (let i=0;i<a.length && ok;i++) for (let d=1; d<3 && i+d<a.length; d++) if (a[i].item===a[i+d].item) { ok=false; break; }
+    if (ok) return a;
+  }
+  return shuffle(base);
+}
+function prefClip(item, sys){ return STIMULI.pref.find(p=>p.item===item).clips[sys]; }
+
+/* ---------- audio ---------- */
+let currentBtn = null;
+function stopAudio(){ player.pause(); player.onended=null; if(currentBtn){ currentBtn.classList.remove('playing'); currentBtn.textContent = currentBtn.dataset.label; currentBtn=null; } }
+function bindPlay(btn, file, onEnded, onStart){
+  btn.dataset.label = btn.textContent;
+  btn.addEventListener('click', ()=>{
+    if (currentBtn === btn){ stopAudio(); return; }
+    stopAudio();
+    player.src = AUDIO_DIR + file + '.wav';
+    player.currentTime = 0;
+    currentBtn = btn; btn.classList.add('playing'); btn.textContent = '■ Zaustavi';
+    player.onended = ()=>{ btn.classList.remove('playing'); btn.textContent = btn.dataset.label; currentBtn=null; onEnded && onEnded(); };
+    const p = player.play(); onStart && onStart();
+    if (p && p.catch) p.catch(()=>{ stopAudio(); alertHint('Zvuk nije mogao da se pusti. Proverite da li je zvuk uključen i pokušajte ponovo.'); });
+  });
+}
+function alertHint(msg){ const h=app.querySelector('.hint'); if(h) h.textContent=msg; }
+
+/* ---------- screens ---------- */
+function start(){
+  const saved = load();
+  if (saved && saved.v === CONFIG.TEST_VERSION){
+    S = saved;
+    if (S.step === 'done') return showDone();
+    if (S.step !== 'welcome') return showResume();
+  }
+  newState(); showWelcome();
+}
+function newState(){
+  S = { v:CONFIG.TEST_VERSION, session:uuid(), started_at:null, step:'welcome', participant:{},
+        pref:buildPrefPlan(), mos:buildMosPlan(), prefIdx:0, mosIdx:0, trials:[], comment:'',
+        submitted:false, finished_at:null };
+}
+function go(step){ S.step = step; save(); ({info:showInfo, volume:showVolume, prefIntro:showPrefIntro, practice:showPractice,
+  pref:showPref, mosIntro:showMosIntro, mos:showMos, comment:showComment, done:showDone})[step](); }
+
+function showResume(){
+  const c = view(`<div class="card"><h1>Dobrodošli nazad</h1>
+    <p>Test ste već započeli na ovom uređaju. Možete nastaviti tamo gde ste stali.</p>
+    <div class="row"><button class="primary" id="cont">Nastavi test</button><button id="restart">Počni ispočetka</button></div>
+    <p class="muted small" style="margin-top:12px">„Počni ispočetka” briše dosadašnje odgovore sa ovog uređaja.</p></div>`);
+  c.querySelector('#cont').onclick = ()=>go(S.step);
+  c.querySelector('#restart').onclick = ()=>{ clearSaved(); newState(); showWelcome(); };
+}
+
+function showWelcome(){
+  const c = view(`<div class="card">
+    <span class="badge">Test slušanja</span>
+    <h1 style="margin-top:10px">Procena sintetizovanog govora na srpskom jeziku</h1>
+    <p>Hvala što želite da učestvujete. Slušaćete kratke rečenice koje je izgovorio računar i ocenjivati ih. Test ima dva dela i traje oko <strong>15 minuta</strong>.</p>
+    <ul>
+      <li><strong>Deo 1:</strong> poslušate dva snimka iste rečenice i izaberete koji vam se više dopada.</li>
+      <li><strong>Deo 2:</strong> poslušate jedan snimak i ocenite koliko prirodno zvuči.</li>
+    </ul>
+    <p><strong>Molimo koristite slušalice</strong> i radite test u tihoj prostoriji, u jednom dahu. Nema tačnih ni pogrešnih odgovora — zanima nas vaš utisak.</p>
+    <p class="muted small">Vaši odgovori koriste se isključivo u istraživačke svrhe. U radu se rezultati objavljuju zbirno i anonimno; ime se ne objavljuje. Za pitanja: <span id="mail"></span>.</p>
+    <label class="check"><input type="checkbox" id="consent"><span>Saglasan/saglasna sam da učestvujem i da se moji odgovori anonimno koriste u istraživanju.</span></label>
+    <div class="row right"><button class="primary" id="go" disabled>Počni</button></div></div>`);
+  c.querySelector('#mail').textContent = CONFIG.CONTACT_EMAIL;
+  const cb = c.querySelector('#consent'), b = c.querySelector('#go');
+  cb.onchange = ()=>{ b.disabled = !cb.checked; };
+  b.onclick = ()=>{ S.started_at = new Date().toISOString(); S.consent = true; go('info'); };
+}
+
+function radios(name, opts){ return `<div class="opts" role="radiogroup">${opts.map(o=>`<label class="opt"><input type="radio" name="${name}" value="${o[0]}"> ${o[1]}</label>`).join('')}</div>`; }
+function showInfo(){
+  const c = view(`<div class="card"><h2>Podaci o učesniku</h2>
+    <p class="muted small">Sva polja su obavezna.</p>
+    <label class="field"><span>Ime i prezime</span><input type="text" id="name" autocomplete="name" maxlength="80"></label>
+    <fieldset><legend>Pol</legend>${radios('gender',[['m','Muški'],['f','Ženski'],['na','Ne želim da navedem']])}</fieldset>
+    <label class="field"><span>Godina rođenja</span><input type="number" id="year" inputmode="numeric" min="1920" max="2012" placeholder="npr. 1995"></label>
+    <fieldset><legend>Da li je srpski vaš maternji jezik?</legend>${radios('native',[['yes','Da'],['no','Ne']])}</fieldset>
+    <fieldset><legend>Na čemu ćete slušati?</legend>${radios('device',[['headphones','Slušalice'],['speakers','Zvučnici računara'],['builtin','Telefon ili laptop bez slušalica']])}</fieldset>
+    <fieldset><legend>Da li imate poznatih problema sa sluhom?</legend>${radios('hearing',[['no','Ne'],['yes','Da'],['unsure','Nisam siguran/sigurna']])}</fieldset>
+    <fieldset><legend>Vaše iskustvo sa sintezom govora</legend>${radios('experience',[['none','Nemam posebnog iskustva'],['user','Povremeno slušam/koristim sintetizovan govor'],['expert','Radim u oblasti govornih tehnologija']])}</fieldset>
+    <div class="err" id="err"></div>
+    <div class="row right"><button class="primary" id="next">Dalje</button></div></div>`);
+  const P = S.participant;
+  if (P.name) c.querySelector('#name').value = P.name;
+  if (P.birth_year) c.querySelector('#year').value = P.birth_year;
+  ['gender','native','device','hearing','experience'].forEach(k=>{ if(P[k]){ const r=c.querySelector(`input[name=${k}][value=${P[k]}]`); if(r) r.checked=true; } });
+  c.querySelector('#next').onclick = ()=>{
+    const val = k=>{ const r=c.querySelector(`input[name=${k}]:checked`); return r ? r.value : ''; };
+    const name = c.querySelector('#name').value.trim(), year = parseInt(c.querySelector('#year').value,10);
+    const data = { name, gender:val('gender'), birth_year:year, native:val('native'), device:val('device'), hearing:val('hearing'), experience:val('experience') };
+    const missing = !name || !data.gender || !data.native || !data.device || !data.hearing || !data.experience;
+    const err = c.querySelector('#err');
+    if (missing){ err.textContent = 'Molimo popunite sva polja.'; return; }
+    if (!(year>=1920 && year<=2012)){ err.textContent = 'Unesite godinu rođenja između 1920. i 2012.'; return; }
+    S.participant = data; go('volume');
+  };
+}
+
+function showVolume(){
+  const f = STIMULI.practice.clips.X;
+  const c = view(`<div class="card"><h2>Podešavanje jačine zvuka</h2>
+    <p>Pustite primer i podesite jačinu zvuka tako da vam bude prijatna i da jasno čujete govor. <strong>Posle toga ne menjajte jačinu</strong> do kraja testa.</p>
+    <button class="play" id="p">▶ Pusti primer</button>
+    <div class="hint"></div>
+    <div class="row right"><button class="primary" id="next" disabled>Jačina je podešena</button></div></div>`);
+  bindPlay(c.querySelector('#p'), f, ()=>{ c.querySelector('#next').disabled=false; });
+  c.querySelector('#next').onclick = ()=>go('prefIntro');
+  preload([STIMULI.practice.clips.X, STIMULI.practice.clips.Y]);
+}
+
+function showPrefIntro(){
+  const c = view(`<div class="card"><span class="badge">Deo 1 od 2</span><h2 style="margin-top:10px">Koji snimak vam se više dopada?</h2>
+    <p>Čućete dva snimka iste rečenice, <strong>Snimak 1</strong> i <strong>Snimak 2</strong>. Poslušajte oba do kraja (možete ih slušati i više puta), a zatim izaberite koji vam se više dopada u celini — koji zvuči prirodnije i prijatnije.</p>
+    <p>Ako zaista ne čujete razliku, izaberite <strong>„Ne mogu da odlučim”</strong>, ali pokušajte da se opredelite kad god možete.</p>
+    <p class="muted small">Prvo sledi jedan probni par koji se ne računa.</p>
+    <div class="row right"><button class="primary" id="next">Probni par</button></div></div>`);
+  c.querySelector('#next').onclick = ()=>go('practice');
+}
+
+function prefTrialUI({title, progressHtml, f1, f2, onDone, buttonLabel}){
+  const c = view(`<div class="card">${progressHtml}
+    <h2>${title}</h2>
+    <div class="players">
+      <div class="player"><div class="name">Snimak 1</div><button class="play" id="b1">▶ Pusti</button><div class="heard" id="h1">nije preslušan</div></div>
+      <div class="player"><div class="name">Snimak 2</div><button class="play" id="b2">▶ Pusti</button><div class="heard" id="h2">nije preslušan</div></div>
+    </div>
+    <p style="font-weight:600;margin-bottom:6px">Koji vam se više dopada?</p>
+    <div class="choices" role="group" aria-label="Izbor">
+      <button class="choice" data-c="1" disabled>Snimak 1</button>
+      <button class="choice" data-c="0" disabled>Ne mogu da odlučim</button>
+      <button class="choice" data-c="2" disabled>Snimak 2</button>
+    </div>
+    <div class="hint">Poslušajte oba snimka do kraja da biste mogli da odgovorite.</div>
+    <div class="row right"><button class="primary" id="next" disabled>${buttonLabel}</button></div></div>`);
+  const heard = {1:false,2:false}, plays = {1:0,2:0}; let choice = null; const t0 = performance.now();
+  const choiceBtns = [...c.querySelectorAll('.choice')];
+  const unlock = ()=>{ if (heard[1] && heard[2]){ choiceBtns.forEach(b=>b.disabled=false); c.querySelector('.hint').textContent=''; } };
+  [[1,f1],[2,f2]].forEach(([k,f])=>bindPlay(c.querySelector('#b'+k), f,
+      ()=>{ heard[k]=true; const h=c.querySelector('#h'+k); h.textContent='✓ preslušan'; h.classList.add('done'); unlock(); },
+      ()=>{ plays[k]++; }));
+  choiceBtns.forEach(b=>b.onclick=()=>{ choice=b.dataset.c; choiceBtns.forEach(x=>x.setAttribute('aria-pressed', x===b)); c.querySelector('#next').disabled=false; });
+  c.querySelector('#next').onclick = ()=>onDone({ choice, plays1:plays[1], plays2:plays[2], rt_ms:Math.round(performance.now()-t0) });
+}
+function progress(label, i, n){ return `<div class="stepline"><span>${label}</span><span>${i} / ${n}</span></div><div class="progress"><div style="width:${100*(i-1)/n}%"></div></div>`; }
+
+function showPractice(){
+  const pr = STIMULI.practice;
+  prefTrialUI({ title:'Probni par (ne računa se)', progressHtml:'<span class="badge">Proba</span>',
+    f1:pr.clips.X, f2:pr.clips.Y, buttonLabel:'Počni Deo 1',
+    onDone:()=>go('pref') });
+  preloadPref(0);
+}
+function preloadPref(i){ const t=S.pref[i]; if(t) preload([prefClip(t.item,'X'), prefClip(t.item,'Y')]); }
+function showPref(){
+  const i = S.prefIdx, t = S.pref[i], n = S.pref.length;
+  if (!t) return go('mosIntro');
+  const second = t.first==='X' ? 'Y':'X';
+  prefTrialUI({ title:`Par ${i+1}`, progressHtml:progress('Deo 1 — izbor boljeg snimka', i+1, n),
+    f1:prefClip(t.item,t.first), f2:prefClip(t.item,second), buttonLabel: i+1<n ? 'Sledeći par →' : 'Završi Deo 1',
+    onDone:(r)=>{
+      S.trials.push({ part:'pref', n:i+1, item:t.item, spk:t.spk, first:t.first, second, repeat:t.repeat,
+                      choice:r.choice, chosen: r.choice==='1'?t.first : r.choice==='2'?second : 'none',
+                      plays1:r.plays1, plays2:r.plays2, rt_ms:r.rt_ms, at:new Date().toISOString() });
+      S.prefIdx++; save(); showPref();
+    }});
+  preloadPref(i+1);
+}
+
+const MOS_LABELS = [[5,'Odlično','potpuno prirodno, kao čovek'],[4,'Dobro','uglavnom prirodno, sitne nepravilnosti'],
+                    [3,'Osrednje','primetno veštački, ali prihvatljivo'],[2,'Loše','izrazito veštački'],[1,'Veoma loše','potpuno neprirodno']];
+function showMosIntro(){
+  const c = view(`<div class="card"><span class="badge">Deo 2 od 2</span><h2 style="margin-top:10px">Koliko prirodno zvuči govor?</h2>
+    <p>Sada ćete slušati jedan po jedan snimak. Poslušajte ga do kraja i ocenite <strong>koliko prirodno zvuči</strong>, na skali od 1 do 5:</p>
+    <ul>${MOS_LABELS.map(l=>`<li><strong>${l[0]} — ${l[1]}</strong>: ${l[2]}</li>`).join('')}</ul>
+    <p>Ocenjujte prirodnost izgovora i intonacije, a ne sadržaj rečenice.</p>
+    <div class="row right"><button class="primary" id="next">Počni Deo 2</button></div></div>`);
+  c.querySelector('#next').onclick = ()=>go('mos');
+  preloadMos(0);
+}
+function preloadMos(i){ const t=S.mos[i]; if(t) preload([t.file]); }
+function showMos(){
+  const i = S.mosIdx, t = S.mos[i], n = S.mos.length;
+  if (!t) return go('comment');
+  const c = view(`<div class="card">${progress('Deo 2 — prirodnost', i+1, n)}
+    <h2>Snimak ${i+1}</h2>
+    <button class="play" id="b">▶ Pusti snimak</button><div class="heard" id="h">nije preslušan</div>
+    <p style="font-weight:600;margin:16px 0 6px">Koliko prirodno zvuči ovaj govor?</p>
+    <div class="scale" role="group" aria-label="Ocena">${MOS_LABELS.map(l=>`<button data-s="${l[0]}" disabled><span class="num">${l[0]}</span><span><strong>${l[1]}</strong> <span class="small">— ${l[2]}</span></span></button>`).join('')}</div>
+    <div class="hint">Poslušajte snimak do kraja da biste mogli da ga ocenite.</div>
+    <div class="row right"><button class="primary" id="next" disabled>${i+1<n?'Sledeći snimak →':'Završi Deo 2'}</button></div></div>`);
+  let plays=0, score=null; const t0=performance.now(); const btns=[...c.querySelectorAll('.scale button')];
+  bindPlay(c.querySelector('#b'), t.file, ()=>{ const h=c.querySelector('#h'); h.textContent='✓ preslušan'; h.classList.add('done');
+      btns.forEach(b=>b.disabled=false); c.querySelector('.hint').textContent=''; }, ()=>{ plays++; });
+  btns.forEach(b=>b.onclick=()=>{ score=+b.dataset.s; btns.forEach(x=>x.setAttribute('aria-pressed', x===b)); c.querySelector('#next').disabled=false; });
+  c.querySelector('#next').onclick=()=>{
+    S.trials.push({ part:'mos', n:i+1, item:t.item, spk:t.spk, sys:t.sys, score, plays, rt_ms:Math.round(performance.now()-t0), at:new Date().toISOString() });
+    S.mosIdx++; save(); showMos();
+  };
+  preloadMos(i+1);
+}
+
+function showComment(){
+  const c = view(`<div class="card"><h2>Skoro gotovo</h2>
+    <label class="field"><span>Komentar (nije obavezno)</span>
+    <textarea id="cm" maxlength="2000" placeholder="Npr. šta vam je zasmetalo, da li ste primetili razlike između snimaka…"></textarea></label>
+    <div class="hint" id="st"></div>
+    <div class="row right"><button class="primary" id="send">Pošalji rezultate</button></div></div>`);
+  c.querySelector('#cm').value = S.comment || '';
+  c.querySelector('#send').onclick = ()=>{ S.comment = c.querySelector('#cm').value.trim(); S.finished_at = new Date().toISOString(); save(); submit(c); };
+}
+
+function payload(){
+  return { version:S.v, session:S.session, started_at:S.started_at, finished_at:S.finished_at,
+           participant:S.participant, consent:!!S.consent, comment:S.comment, trials:S.trials,
+           client:{ ua:navigator.userAgent, lang:navigator.language, screen: window.screen ? window.screen.width+'x'+window.screen.height : '' } };
+}
+async function submit(c){
+  const btn = c.querySelector('#send'), st = c.querySelector('#st');
+  if (!CONFIG.SUBMIT_URL){ S.submitted=false; S.sendStatus='local'; go('done'); return; }
+  btn.disabled = true; st.textContent = 'Slanje…';
+  const body = JSON.stringify(payload());
+  try{
+    const r = await fetch(CONFIG.SUBMIT_URL, { method:'POST', body });   // text/plain: no CORS preflight
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'server');
+    S.submitted = true; S.sendStatus = 'ok';
+  }catch(e){
+    try{ await fetch(CONFIG.SUBMIT_URL, { method:'POST', body, mode:'no-cors' }); S.sendStatus='unconfirmed'; S.submitted=true; }
+    catch(e2){ S.sendStatus='failed'; S.submitted=false; }
+  }
+  go('done');
+}
+function download(){
+  const blob = new Blob([JSON.stringify(payload(), null, 1)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `rezultati_${(S.participant.name||'ucesnik').replace(/[^\p{L}\p{N}]+/gu,'_')}_${S.session.slice(0,6)}.json`;
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function showDone(){
+  const code = S.session.slice(0,6).toUpperCase();
+  const msg = {
+    ok: '<p>Vaši rezultati su uspešno poslati. Hvala vam na vremenu!</p>',
+    unconfirmed: '<p>Rezultati su poslati, ali server nije potvrdio prijem. Da biste bili sigurni, sačuvajte datoteku sa rezultatima i pošaljite je na <span class="mail"></span>.</p>',
+    failed: '<p><strong>Slanje nije uspelo</strong> (verovatno zbog internet veze). Pokušajte ponovo, ili sačuvajte datoteku i pošaljite je na <span class="mail"></span>.</p>',
+    local: '<p class="muted">Adresa za slanje još nije podešena (probni režim). Sačuvajte datoteku sa rezultatima.</p>'
+  }[S.sendStatus || 'ok'];
+  const c = view(`<div class="card"><h1>Hvala!</h1>${msg}
+    <p class="muted small">Kod vašeg učešća: <span class="code">${code}</span></p>
+    <div class="row">${S.sendStatus==='failed' ? '<button class="primary" id="retry">Pokušaj ponovo</button>' : ''}
+      ${S.sendStatus!=='ok' ? '<button id="dl">Sačuvaj datoteku sa rezultatima</button>' : ''}</div></div>`);
+  c.querySelectorAll('.mail').forEach(m=>m.textContent=CONFIG.CONTACT_EMAIL);
+  const dl=c.querySelector('#dl'); if(dl) dl.onclick=download;
+  const rt=c.querySelector('#retry'); if(rt) rt.onclick=()=>{ S.step='comment'; showComment(); };
+  S.step='done'; save();
+}
+
+start();
+</script>
+</body>
+</html>
