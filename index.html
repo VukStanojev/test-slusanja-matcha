@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test slušanja — sinteza govora</title>
+<title>Test slušanja — kvalitet govora</title>
 <style>
 :root{
   --bg:#f5f6f8; --card:#ffffff; --ink:#1c2430; --muted:#5b6675; --line:#dde2e8;
@@ -68,8 +68,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <main id="app" aria-live="polite"><div class="card"><p>Učitavanje…</p></div></main>
 <noscript><main><div class="card">Za ovaj test potrebno je da uključite JavaScript.</div></main></noscript>
 
-<script src="config.js"></script>
-<script src="stimuli.js"></script>
+<script src="config.js?v=2"></script>
+<script src="stimuli.js?v=2"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -97,20 +97,31 @@ function preload(files){ files.forEach(f=>{ const a=new Audio(); a.preload='auto
 
 /* ---------- randomized plan (built once per listener) ---------- */
 function buildPrefPlan(){
-  // Counterbalance presentation order within each speaker: half X-first, half Y-first.
+  // Pairs are grouped by comparison (the two condition codes, e.g. "XY"). Within each comparison, half of
+  // the pairs present the alphabetically first condition first, split as evenly as possible between speakers.
+  const byCmp = {};
+  STIMULI.pref.forEach(p=>{ const k=p.codes.slice().sort().join(''); (byCmp[k]=byCmp[k]||[]).push(p); });
   let trials = [];
-  for (const spk of ['J','S']){
-    const items = shuffle(STIMULI.pref.filter(p=>p.spk===spk));
-    items.forEach((p,i)=>trials.push({ item:p.item, spk, first: i < items.length/2 ? 'X':'Y', repeat:false }));
+  for (const k of Object.keys(byCmp)){
+    const list = byCmp[k], a = k[0], b = k[1];
+    let left = Math.floor(list.length/2) + (list.length % 2 ? rnd(2) : 0);   // pairs with `a` first
+    const spks = shuffle([...new Set(list.map(p=>p.spk))]);
+    spks.forEach((spk, si)=>{
+      const items = shuffle(list.filter(p=>p.spk===spk));
+      const exact = items.length * left / list.filter(p=>spks.indexOf(p.spk) >= si).length;
+      let nA = si === spks.length-1 ? left : (rnd(2) ? Math.floor(exact) : Math.ceil(exact));
+      nA = Math.max(0, Math.min(items.length, nA)); left -= nA;
+      items.forEach((p,i)=>trials.push({ item:p.item, spk, cmp:k, first: i<nA ? a : b, second: i<nA ? b : a, repeat:false }));
+    });
   }
   trials = shuffle(trials);
-  // One consistency repeat per speaker, order swapped, placed late and >= 6 trials after the original.
-  // Pick the pair to repeat from the first 16 positions so a distant late slot always exists.
-  const reps = ['J','S'].map(spk=>{ const t = shuffle(trials.slice(0,16).filter(x=>x.spk===spk))[0];
-                                   return { item:t.item, spk, first: t.first==='X'?'Y':'X', repeat:true }; });
+  // One consistency repeat per speaker (order swapped), taken from the first 12 trials,
+  // placed among the last slots and at least 6 trials after the original.
+  const reps = ['J','S'].map(spk=>{ const t = shuffle(trials.slice(0,12).filter(x=>x.spk===spk))[0];
+                                   return { item:t.item, spk, cmp:t.cmp, first:t.second, second:t.first, repeat:true }; });
   for (let tries=0; tries<2000; tries++){
     const out = trials.slice();
-    for (const r of reps) out.splice(out.length - 8 + rnd(9), 0, r);   // among the last slots
+    for (const r of reps) out.splice(out.length - 6 + rnd(7), 0, r);
     const ok = reps.every(r => out.indexOf(r) - out.findIndex(x=>x.item===r.item && !x.repeat) >= 6);
     if (ok) return out;
   }
@@ -176,8 +187,8 @@ function showResume(){
 function showWelcome(){
   const c = view(`<div class="card">
     <span class="badge">Test slušanja</span>
-    <h1 style="margin-top:10px">Procena sintetizovanog govora na srpskom jeziku</h1>
-    <p>Hvala što želite da učestvujete. Slušaćete kratke rečenice koje je izgovorio računar i ocenjivati ih. Test ima dva dela i traje oko <strong>15 minuta</strong>.</p>
+    <h1 style="margin-top:10px">Procena kvaliteta govora na srpskom jeziku</h1>
+    <p>Hvala što želite da učestvujete. Slušaćete kratke snimke izgovorenih rečenica i ocenjivati ih. Test ima dva dela i traje oko <strong>12 minuta</strong>.</p>
     <ul>
       <li><strong>Deo 1:</strong> poslušate dva snimka iste rečenice i izaberete koji vam se više dopada.</li>
       <li><strong>Deo 2:</strong> poslušate jedan snimak i ocenite koliko prirodno zvuči.</li>
@@ -222,7 +233,7 @@ function showInfo(){
 }
 
 function showVolume(){
-  const f = STIMULI.practice.clips.X;
+  const f = STIMULI.practice.clips[STIMULI.practice.codes[0]];
   const c = view(`<div class="card"><h2>Podešavanje jačine zvuka</h2>
     <p>Pustite primer i podesite jačinu zvuka tako da vam bude prijatna i da jasno čujete govor. <strong>Posle toga ne menjajte jačinu</strong> do kraja testa.</p>
     <button class="play" id="p">▶ Pusti primer</button>
@@ -230,7 +241,7 @@ function showVolume(){
     <div class="row right"><button class="primary" id="next" disabled>Jačina je podešena</button></div></div>`);
   bindPlay(c.querySelector('#p'), f, ()=>{ c.querySelector('#next').disabled=false; });
   c.querySelector('#next').onclick = ()=>go('prefIntro');
-  preload([STIMULI.practice.clips.X, STIMULI.practice.clips.Y]);
+  preload(STIMULI.practice.codes.map(c=>STIMULI.practice.clips[c]));
 }
 
 function showPrefIntro(){
@@ -271,19 +282,19 @@ function progress(label, i, n){ return `<div class="stepline"><span>${label}</sp
 function showPractice(){
   const pr = STIMULI.practice;
   prefTrialUI({ title:'Probni par (ne računa se)', progressHtml:'<span class="badge">Proba</span>',
-    f1:pr.clips.X, f2:pr.clips.Y, buttonLabel:'Počni Deo 1',
+    f1:pr.clips[pr.codes[0]], f2:pr.clips[pr.codes[1]], buttonLabel:'Počni Deo 1',
     onDone:()=>go('pref') });
   preloadPref(0);
 }
-function preloadPref(i){ const t=S.pref[i]; if(t) preload([prefClip(t.item,'X'), prefClip(t.item,'Y')]); }
+function preloadPref(i){ const t=S.pref[i]; if(t) preload([prefClip(t.item,t.first), prefClip(t.item,t.second)]); }
 function showPref(){
   const i = S.prefIdx, t = S.pref[i], n = S.pref.length;
   if (!t) return go('mosIntro');
-  const second = t.first==='X' ? 'Y':'X';
+  const second = t.second;
   prefTrialUI({ title:`Par ${i+1}`, progressHtml:progress('Deo 1 — izbor boljeg snimka', i+1, n),
     f1:prefClip(t.item,t.first), f2:prefClip(t.item,second), buttonLabel: i+1<n ? 'Sledeći par →' : 'Završi Deo 1',
     onDone:(r)=>{
-      S.trials.push({ part:'pref', n:i+1, item:t.item, spk:t.spk, first:t.first, second, repeat:t.repeat,
+      S.trials.push({ part:'pref', n:i+1, item:t.item, spk:t.spk, cmp:t.cmp, first:t.first, second, repeat:t.repeat,
                       choice:r.choice, chosen: r.choice==='1'?t.first : r.choice==='2'?second : 'none',
                       plays1:r.plays1, plays2:r.plays2, rt_ms:r.rt_ms, at:new Date().toISOString() });
       S.prefIdx++; save(); showPref();

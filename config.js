@@ -6,6 +6,6 @@
 // ------------------------------------------------------------------
 const CONFIG = {
   SUBMIT_URL: 'https://script.google.com/macros/s/AKfycbzNyduVhC8hXPCpRfg56_aD5VyAzpLKpLs5rLL8GEX8EHuZKishLALp-9pBiBOapdOq/exec',
-  TEST_VERSION: 'telfor2026-v1',
+  TEST_VERSION: 'telfor2026-v2',
   CONTACT_EMAIL: 'vukstns@gmail.com',
 };
